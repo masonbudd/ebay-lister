@@ -36,16 +36,19 @@ function toAspects(specifics: Record<string, string> | null): Record<string, str
   return out;
 }
 
-async function signedPhotoUrls(itemId: string, expirySeconds = 60 * 60 * 24 * 7): Promise<string[]> {
+// eBay's imageUrls field limits URL length (and signed URLs blow past it).
+// Use Supabase's short public URL format: the `item-photos` bucket must be PUBLIC.
+async function publicPhotoUrls(itemId: string): Promise<string[]> {
   const db = createServiceClient();
   const { data: photos, error } = await db.from("photos")
     .select("storage_path,sort_order").eq("item_id", itemId).order("sort_order");
   if (error) throw new Error(`photos: ${error.message}`);
   const paths = (photos ?? []).map((p) => p.storage_path);
   if (paths.length === 0) return [];
-  const { data, error: e2 } = await db.storage.from("item-photos").createSignedUrls(paths, expirySeconds);
-  if (e2) throw new Error(`signed urls: ${e2.message}`);
-  return (data ?? []).map((d) => d.signedUrl).filter(Boolean);
+  return paths.map((path) => {
+    const { data } = db.storage.from("item-photos").getPublicUrl(path);
+    return data.publicUrl;
+  });
 }
 
 export async function publishItem(userId: string, itemId: string): Promise<{
@@ -68,7 +71,7 @@ export async function publishItem(userId: string, itemId: string): Promise<{
   // and set shipping / returns / payment inline on the offer below.
 
   const sku = skuFor(item.id);
-  const imageUrls = await signedPhotoUrls(item.id);
+  const imageUrls = await publicPhotoUrls(item.id);
   if (imageUrls.length === 0) throw new Error("No photos to upload");
 
   // 1) Create / replace inventory item

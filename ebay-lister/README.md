@@ -21,8 +21,8 @@ Next session: eBay OAuth + listing publication.
 
 1. Create a project at https://supabase.com.
 2. SQL editor → paste and run `supabase/schema.sql`.
-3. Storage → **New bucket** called `item-photos`, **Private** (not public).
-4. Storage → Policies for `item-photos`. Add one policy per action (SELECT, INSERT, UPDATE, DELETE) with expression:
+3. Storage → **New bucket** called `item-photos`, **Public** (eBay's `imageUrls` field requires short, publicly-fetchable URLs — signed URLs are too long). The path layout `{user_id}/{item_id}/{uuid}.jpg` means filenames aren't guessable, but the bucket itself is world-readable.
+4. Storage → Policies for `item-photos`. Keep SELECT public (auto-enabled when the bucket is public). Add INSERT / UPDATE / DELETE policies restricted to the owner, with expression:
    ```
    bucket_id = 'item-photos'
    AND (storage.foldername(name))[1] = auth.uid()::text
