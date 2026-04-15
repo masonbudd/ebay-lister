@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f1117;
+  --bg-elev: #161924;
+  --card: rgba(24, 28, 40, 0.72);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --fg: #e7ebf3;
+  --fg-muted: #8b93a7;
+  --fg-dim: #5a6378;
+  --accent: #3b82f6;
+  --accent-hover: #2f6fe0;
+  --danger: #ef4444;
+
+  --amber: #f59e0b;
+  --green: #10b981;
+  --purple: #a855f7;
+
+  --radius: 14px;
+  --tab-h: 68px;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --font-sans: var(--font-inter);
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(59, 130, 246, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(168, 85, 247, 0.06), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Inputs — dark, subtle */
+input, textarea, select, button {
+  font: inherit;
+  color: inherit;
+}
+
+input[type="text"], input[type="email"], input[type="password"], input[type="number"],
+textarea, select {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-height: 44px;
+  width: 100%;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  background: rgba(59,130,246,0.06);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+}
+input::placeholder, textarea::placeholder { color: var(--fg-dim); }
+select option { background: var(--bg-elev); color: var(--fg); }
+
+/* Card */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 16px; border-radius: 12px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  color: var(--fg); font-weight: 500;
+  transition: transform 80ms ease, background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+.btn:hover { background: rgba(255,255,255,0.07); }
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-danger-outline { color: #fca5a5; border-color: rgba(239,68,68,0.35); }
+.btn-danger-outline:hover { background: rgba(239,68,68,0.1); }
+
+/* Page fade-in */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+main { animation: fadeInUp 220ms ease-out both; }
+
+/* Tab bar safe-area padding */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
