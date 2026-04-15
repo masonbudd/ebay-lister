@@ -1,9 +1,11 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/components/Toast";
 
-export default function PublishButton({ itemId, className }: { itemId: string; className?: string }) {
+export default function PublishButton({ itemId, title, className }: { itemId: string; title?: string | null; className?: string }) {
   const router = useRouter();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,9 +20,12 @@ export default function PublishButton({ itemId, className }: { itemId: string; c
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      toast(`Listed “${title ?? "item"}”.`, "success");
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast(`Publish failed: ${msg.slice(0, 160)}`, "error");
     } finally {
       setLoading(false);
     }

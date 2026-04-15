@@ -3,6 +3,8 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 import { CheckIcon, TrashIcon } from "@/components/Icons";
+import PhotoViewer from "@/components/PhotoViewer";
+import { useToast } from "@/components/Toast";
 
 type Item = {
   id: string;
@@ -25,14 +27,22 @@ const CONDITIONS = ["New", "Like New", "Very Good", "Good", "Acceptable"];
 export default function ItemCard({
   item: initial,
   photos,
+  selected,
+  selectable,
+  onToggle,
 }: {
   item: Item;
   photos: { url: string; path: string }[];
+  selected?: boolean;
+  selectable?: boolean;
+  onToggle?: () => void;
 }) {
   const router = useRouter();
   const supabase = createClient();
+  const { toast } = useToast();
   const [item, setItem] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [viewerIdx, setViewerIdx] = useState<number | null>(null);
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -56,23 +66,29 @@ export default function ItemCard({
 
   async function save() {
     setSaving(true);
-    await supabase.from("items").update({
+    const { error } = await supabase.from("items").update({
       title: item.title, description: item.description, condition: item.condition,
       price: item.price, price_is_estimate: item.price_is_estimate,
       item_specifics: item.item_specifics,
     }).eq("id", item.id);
     setSaving(false);
+    if (error) toast(error.message, "error");
+    else toast("Saved.", "success");
   }
 
   async function approve() {
     await save();
-    await supabase.from("items").update({ status: "approved" }).eq("id", item.id);
+    const { error } = await supabase.from("items").update({ status: "approved" }).eq("id", item.id);
+    if (error) return toast(error.message, "error");
+    toast(`Approved “${item.title ?? "item"}”.`, "success");
     router.refresh();
   }
 
   async function reject() {
     if (!confirm("Delete this item?")) return;
-    await supabase.from("items").delete().eq("id", item.id);
+    const { error } = await supabase.from("items").delete().eq("id", item.id);
+    if (error) return toast(error.message, "error");
+    toast("Deleted.", "success");
     router.refresh();
   }
 
@@ -86,25 +102,38 @@ export default function ItemCard({
   }
 
   const specifics = item.item_specifics ?? {};
+  const photoUrls = photos.map((p) => p.url).filter(Boolean);
 
   return (
-    <div className="card overflow-hidden">
-      {/* Photos — larger, horizontally scrollable */}
+    <div className="card overflow-hidden relative">
+      {selectable && (
+        <label className="absolute top-3 left-3 z-10 flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggle}
+            className="w-6 h-6 accent-blue-500"
+          />
+        </label>
+      )}
+
       {photos.length > 0 && (
         <div className="flex gap-2 overflow-x-auto p-3 pb-2" style={{ scrollSnapType: "x mandatory" }}>
-          {photos.map((p) => (
-            <img
+          {photos.map((p, i) => (
+            <button
+              type="button"
               key={p.path}
-              src={p.url}
-              alt=""
-              className="rounded-xl shrink-0 object-cover"
-              style={{
-                width: 180,
-                height: 180,
-                scrollSnapAlign: "start",
-                border: "1px solid var(--border)",
-              }}
-            />
+              onClick={() => setViewerIdx(i)}
+              className="shrink-0 rounded-xl overflow-hidden"
+              style={{ scrollSnapAlign: "start", border: "1px solid var(--border)", padding: 0 }}
+            >
+              <img
+                src={p.url}
+                alt=""
+                className="object-cover"
+                style={{ width: 180, height: 180 }}
+              />
+            </button>
           ))}
         </div>
       )}
@@ -119,10 +148,7 @@ export default function ItemCard({
               border: "1px solid rgba(245,158,11,0.25)",
             }}
           >
-            <span
-              className="w-2 h-2 rounded-full animate-pulse"
-              style={{ background: "#f59e0b" }}
-            />
+            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#f59e0b" }} />
             Processing with AI…
           </div>
         )}
@@ -191,21 +217,13 @@ export default function ItemCard({
 
         {Object.keys(specifics).length > 0 && (
           <details className="text-sm">
-            <summary
-              className="cursor-pointer select-none py-1"
-              style={{ color: "var(--fg-muted)" }}
-            >
+            <summary className="cursor-pointer select-none py-1" style={{ color: "var(--fg-muted)" }}>
               Item specifics ({Object.keys(specifics).length})
             </summary>
             <div className="mt-2 space-y-2">
               {Object.entries(specifics).map(([k, v]) => (
                 <div key={k} className="flex gap-2 items-center">
-                  <span
-                    className="w-32 shrink-0 text-xs"
-                    style={{ color: "var(--fg-dim)" }}
-                  >
-                    {k}
-                  </span>
+                  <span className="w-32 shrink-0 text-xs" style={{ color: "var(--fg-dim)" }}>{k}</span>
                   <input
                     type="text"
                     value={v}
@@ -223,7 +241,6 @@ export default function ItemCard({
         </div>
       </div>
 
-      {/* Sticky action bar within the card — full-width buttons */}
       <div
         className="sticky bottom-0 grid grid-cols-4 gap-2 p-3"
         style={{
@@ -247,6 +264,14 @@ export default function ItemCard({
           <CheckIcon size={18} /> Approve
         </button>
       </div>
+
+      {viewerIdx !== null && photoUrls.length > 0 && (
+        <PhotoViewer
+          urls={photoUrls}
+          startIndex={viewerIdx}
+          onClose={() => setViewerIdx(null)}
+        />
+      )}
     </div>
   );
 }

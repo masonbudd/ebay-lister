@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
 import { GearIcon, SignOutIcon } from "@/components/Icons";
+import { ToastProvider } from "@/components/Toast";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -15,11 +16,26 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "eBay Lister",
   description: "Photograph, describe with AI, list on eBay.",
+  applicationName: "eBay Lister",
+  appleWebApp: {
+    capable: true,
+    title: "Lister",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport = {
   themeColor: "#0f1117",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
 };
+
+async function draftCount(supabase: Awaited<ReturnType<typeof createClient>>) {
+  const { count } = await supabase.from("items")
+    .select("*", { count: "exact", head: true }).eq("status", "draft");
+  return count ?? 0;
+}
 
 export default async function RootLayout({
   children,
@@ -30,6 +46,7 @@ export default async function RootLayout({
   return (
     <html lang="en-GB" className={`${inter.variable} h-full`}>
       <body className="min-h-full flex flex-col">
+        <ToastProvider>
         {user && (
           <header
             className="sticky top-0 z-20"
@@ -72,7 +89,8 @@ export default async function RootLayout({
           {children}
         </main>
 
-        {user && <BottomNav />}
+        {user && <BottomNav draftCount={await draftCount(supabase)} />}
+        </ToastProvider>
       </body>
     </html>
   );

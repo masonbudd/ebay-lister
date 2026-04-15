@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { PlusIcon } from "@/components/Icons";
+import PullToRefresh from "@/components/PullToRefresh";
+import DashboardActions from "./DashboardActions";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,7 @@ export default async function Home() {
   const map = Object.fromEntries(counts) as Record<string, number>;
 
   return (
+    <PullToRefresh>
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -50,10 +53,9 @@ export default async function Home() {
         ))}
       </div>
 
-      <p className="text-xs" style={{ color: "var(--fg-dim)" }}>
-        eBay publishing isn't wired up yet — approved items stay in the Approved state until the next build step.
-      </p>
+      <DashboardActions />
     </div>
+    </PullToRefresh>
   );
 }
 

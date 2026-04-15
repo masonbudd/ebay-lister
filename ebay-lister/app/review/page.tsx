@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signedUrlsFor } from "@/lib/photos";
-import ItemCard from "./ItemCard";
+import ReviewList from "./ReviewList";
 
 export const dynamic = "force-dynamic";
 
@@ -48,11 +48,10 @@ export default async function ReviewPage() {
         </div>
       )}
 
-      <div className="space-y-4">
-        {(items ?? []).map((item) => (
-          <ItemCard key={item.id} item={item} photos={photosByItem.get(item.id) ?? []} />
-        ))}
-      </div>
+      <ReviewList
+        items={items ?? []}
+        photosByItem={Object.fromEntries(photosByItem)}
+      />
     </div>
   );
 }

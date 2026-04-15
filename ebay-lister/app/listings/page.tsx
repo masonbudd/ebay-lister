@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { signedUrlsFor } from "@/lib/photos";
 import PublishButton from "@/app/review/PublishButton";
 import ResetButton from "./ResetButton";
+import BulkPublishButton from "./BulkPublishButton";
+import PullToRefresh from "@/components/PullToRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +46,7 @@ export default async function ListingsPage() {
   const urls = await signedUrlsFor([...firstByItem.values()]);
 
   return (
+    <PullToRefresh>
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Listings</h1>
@@ -53,6 +56,9 @@ export default async function ListingsPage() {
       </div>
 
       <Section title={`Ready to publish (${approvedItems.length})`}>
+        {approvedItems.length > 0 && (
+          <BulkPublishButton items={approvedItems.map((i) => ({ id: i.id, title: i.title }))} />
+        )}
         {approvedItems.length === 0 ? (
           <Empty>Nothing approved yet. Approve drafts in Review.</Empty>
         ) : (
@@ -60,7 +66,7 @@ export default async function ListingsPage() {
             <Row
               key={i.id} item={i}
               thumb={urls[firstByItem.get(i.id) ?? ""] ?? ""}
-              right={<PublishButton itemId={i.id} />}
+              right={<PublishButton itemId={i.id} title={i.title} />}
             />
           ))
         )}
@@ -93,6 +99,7 @@ export default async function ListingsPage() {
         )}
       </Section>
     </div>
+    </PullToRefresh>
   );
 }
 
