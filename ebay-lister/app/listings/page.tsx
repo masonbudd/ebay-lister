@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signedUrlsFor } from "@/lib/photos";
 import PublishButton from "@/app/review/PublishButton";
+import ResetButton from "./ResetButton";
 
 export const dynamic = "force-dynamic";
 
@@ -74,15 +75,18 @@ export default async function ListingsPage() {
               key={i.id} item={i}
               thumb={urls[firstByItem.get(i.id) ?? ""] ?? ""}
               right={
-                i.ebay_listing_url ? (
-                  <a
-                    href={i.ebay_listing_url} target="_blank" rel="noreferrer"
-                    className="btn"
-                    style={{ minHeight: 40, padding: "0 12px" }}
-                  >
-                    View on eBay
-                  </a>
-                ) : null
+                <div className="flex flex-col items-end gap-1">
+                  {i.ebay_listing_url && (
+                    <a
+                      href={i.ebay_listing_url} target="_blank" rel="noreferrer"
+                      className="btn"
+                      style={{ minHeight: 36, padding: "0 10px", fontSize: 12 }}
+                    >
+                      View on eBay
+                    </a>
+                  )}
+                  <ResetButton itemId={i.id} />
+                </div>
               }
             />
           ))
