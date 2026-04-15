@@ -5,6 +5,7 @@ import PublishButton from "@/app/review/PublishButton";
 import ResetButton from "./ResetButton";
 import BulkPublishButton from "./BulkPublishButton";
 import PullToRefresh from "@/components/PullToRefresh";
+import UnapproveButton from "./UnapproveButton";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +67,12 @@ export default async function ListingsPage() {
             <Row
               key={i.id} item={i}
               thumb={urls[firstByItem.get(i.id) ?? ""] ?? ""}
-              right={<PublishButton itemId={i.id} title={i.title} />}
+              right={
+                <div className="flex flex-col items-end gap-1">
+                  <PublishButton itemId={i.id} title={i.title} />
+                  <UnapproveButton itemId={i.id} />
+                </div>
+              }
             />
           ))
         )}

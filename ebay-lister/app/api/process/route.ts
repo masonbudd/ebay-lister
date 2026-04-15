@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { generateListing } from "@/lib/ai/listing";
+import { generateListing, cleanTitle } from "@/lib/ai/listing";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
 
     await supabase.from("items").update({
       status: "draft",
-      title: listing.title?.slice(0, 80),
+      title: cleanTitle(listing.title ?? ""),
       description: listing.description,
       condition: listing.condition,
       category_id: listing.category_id ?? null,

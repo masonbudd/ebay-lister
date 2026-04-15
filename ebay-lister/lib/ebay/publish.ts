@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { ebayFetch, ebayFor } from "./client";
 import { EBAY_CURRENCY, EBAY_ENV, ebayCredentials } from "./config";
 import type { EbayTokenRow } from "./tokens";
+import { cleanTitle } from "@/lib/ai/listing";
 
 type ItemRow = {
   id: string;
@@ -205,7 +206,7 @@ function sanitiseAspectValue(name: string, raw: string): string {
 }
 
 function buildAddFixedPriceItemXml(item: ItemRow, imageUrls: string[]): string {
-  const title = escapeXml((item.title ?? "").slice(0, 80));
+  const title = escapeXml(cleanTitle(item.title ?? ""));
   const description = cdata(item.description ?? "");
   const conditionId = CONDITION_ID[item.condition ?? ""] ?? "4000";
   const price = (item.price ?? 0).toFixed(2);
