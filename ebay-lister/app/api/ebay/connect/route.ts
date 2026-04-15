@@ -12,11 +12,8 @@ export async function GET() {
   if (!user) return NextResponse.redirect(new URL("/login", "http://localhost"));
 
   const { authorize } = ebayEndpoints();
-  const { clientId } = ebayCredentials();
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not set");
-  const redirectUri = `${appUrl.replace(/\/$/, "")}/api/ebay/callback`;
+  const { clientId, redirectUri } = ebayCredentials();
+  // eBay OAuth expects the RuName string as redirect_uri, not a URL.
 
   const state = crypto.randomUUID();
   const params = new URLSearchParams({

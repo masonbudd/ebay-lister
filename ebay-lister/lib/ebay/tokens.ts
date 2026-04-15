@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { basicAuthHeader, EBAY_ENV, ebayEndpoints } from "./config";
+import { basicAuthHeader, ebayCredentials, EBAY_ENV, ebayEndpoints } from "./config";
 
 export type EbayTokenRow = {
   id: string;
@@ -56,9 +56,8 @@ export async function exchangeAuthCode(code: string): Promise<{
   access_token: string; refresh_token: string; expires_in: number; refresh_token_expires_in: number;
 }> {
   const { token } = ebayEndpoints();
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not set");
-  const redirectUri = `${appUrl.replace(/\/$/, "")}/api/ebay/callback`;
+  // eBay token exchange expects the same RuName that was used in the authorize request.
+  const { redirectUri } = ebayCredentials();
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
