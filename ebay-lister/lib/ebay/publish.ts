@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { ebayFetch } from "./client";
 import { ebayFor } from "./client";
-import { ensureMerchantLocation, ensureBusinessPolicies } from "./setup";
+import { ensureMerchantLocation } from "./setup";
 import { EBAY_CURRENCY, EBAY_MARKETPLACE, EBAY_ENV } from "./config";
 
 type ItemRow = {
@@ -64,7 +64,8 @@ export async function publishItem(userId: string, itemId: string): Promise<{
 
   let token = await ebayFor(userId);
   token = await ensureMerchantLocation(userId, token);
-  token = await ensureBusinessPolicies(userId, token);
+  // Sandbox sellers aren't eligible for Business Policies — skip policy creation
+  // and set shipping / returns / payment inline on the offer below.
 
   const sku = skuFor(item.id);
   const imageUrls = await signedPhotoUrls(item.id);
@@ -86,7 +87,7 @@ export async function publishItem(userId: string, itemId: string): Promise<{
     allowEmpty: true,
   });
 
-  // 2) Create offer
+  // 2) Create offer — inline shipping / return / payment terms (no business policies)
   const offer = await ebayFetch<{ offerId: string }>(token, "/sell/inventory/v1/offer", {
     method: "POST",
     body: {
@@ -96,14 +97,33 @@ export async function publishItem(userId: string, itemId: string): Promise<{
       availableQuantity: 1,
       categoryId: item.category_id,
       listingDescription: item.description,
-      listingPolicies: {
-        fulfillmentPolicyId: token.fulfillment_policy_id,
-        paymentPolicyId: token.payment_policy_id,
-        returnPolicyId: token.return_policy_id,
-      },
       merchantLocationKey: token.merchant_location_key,
       pricingSummary: {
         price: { value: item.price.toFixed(2), currency: EBAY_CURRENCY },
+      },
+      // Buyer pays Royal Mail 2nd Class.
+      listingPolicies: {
+        shippingCostOverrides: [
+          {
+            surcharge: { value: "0.00", currency: EBAY_CURRENCY },
+            shippingCost: { value: "3.99", currency: EBAY_CURRENCY },
+            additionalShippingCost: { value: "0.00", currency: EBAY_CURRENCY },
+            shippingServiceType: "DOMESTIC",
+            priority: 1,
+          },
+        ],
+      },
+      // 30-day returns, buyer pays return postage.
+      returnTerms: {
+        returnsAccepted: true,
+        refundMethod: "MONEY_BACK",
+        returnMethod: "REPLACEMENT_OR_MONEY_BACK",
+        returnPeriod: { value: 30, unit: "DAY" },
+        returnShippingCostPayer: "BUYER",
+      },
+      // Managed payments on eBay UK — immediate pay, no further config needed.
+      paymentTerms: {
+        immediatePay: true,
       },
     },
   });
