@@ -15,13 +15,13 @@ type ItemRow = {
   item_specifics: Record<string, string> | null;
 };
 
-// eBay condition IDs (standard). Good enough for books/collectibles on UK.
+// Inventory API uses conditionEnum values, not numeric condition IDs.
 const CONDITION_MAP: Record<string, string> = {
-  "New": "1000",
-  "Like New": "1500",
-  "Very Good": "4000",
-  "Good": "5000",
-  "Acceptable": "6000",
+  "New": "NEW",
+  "Like New": "LIKE_NEW",
+  "Very Good": "USED_VERY_GOOD",
+  "Good": "USED_GOOD",
+  "Acceptable": "USED_ACCEPTABLE",
 };
 
 function skuFor(itemId: string) {
@@ -76,7 +76,7 @@ export async function publishItem(userId: string, itemId: string): Promise<{
     method: "PUT",
     body: {
       availability: { shipToLocationAvailability: { quantity: 1 } },
-      condition: CONDITION_MAP[item.condition] ?? "4000",
+      condition: CONDITION_MAP[item.condition] ?? "USED_VERY_GOOD",
       product: {
         title: item.title.slice(0, 80),
         description: item.description,
