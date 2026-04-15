@@ -64,6 +64,108 @@ async function suggestLeafCategory(token: EbayTokenRow, title: string): Promise<
   }
 }
 
+// Aliases: eBay required aspect name -> array of AI field names we might already have.
+// Left side is normalised (lowercase).
+const ASPECT_ALIASES: Record<string, string[]> = {
+  "publication name": ["Publisher", "Publication", "Publication Title", "Imprint"],
+  "publication year": ["Publication Year", "Year Published", "Year"],
+  "book title": ["Title", "Book Title"],
+  "author": ["Author", "Authors", "By"],
+  "subject": ["Topic", "Subject", "Genre"],
+  "topic": ["Topic", "Subject", "Genre"],
+  "genre": ["Genre", "Topic", "Subject"],
+  "format": ["Format", "Binding", "Cover"],
+  "language": ["Language"],
+  "educational level": ["Level", "Grade", "Key Stage", "Age Range"],
+  "type": ["Type", "Category", "Book Type"],
+  "brand": ["Brand", "Manufacturer", "Maker"],
+  "material": ["Material", "Materials"],
+  "colour": ["Colour", "Color"],
+  "color": ["Colour", "Color"],
+  "country/region of manufacture": ["Country of Manufacture", "Country", "Origin"],
+  "issue number": ["Issue Number", "Issue", "Issue No"],
+  "publication date": ["Publication Date", "Issue Date", "Date"],
+  "isbn": ["ISBN", "ISBN-13", "ISBN-10"],
+};
+
+// Category-agnostic heuristic fallbacks when both AI data and aliases come up empty.
+const HEURISTIC_FALLBACKS: Record<string, string> = {
+  "type": "Textbook",
+  "format": "Paperback",
+  "language": "English",
+  "country/region of manufacture": "United Kingdom",
+};
+
+type AspectMeta = { name: string; required: boolean };
+
+async function fetchRequiredAspects(
+  token: EbayTokenRow, categoryId: string,
+): Promise<AspectMeta[]> {
+  try {
+    const resp = await ebayFetch<{
+      aspects?: {
+        localizedAspectName?: string;
+        aspectConstraint?: { aspectRequired?: boolean };
+      }[];
+    }>(token, `/commerce/taxonomy/v1/category_tree/3/get_item_aspects_for_category?category_id=${encodeURIComponent(categoryId)}`);
+    return (resp.aspects ?? [])
+      .filter((a) => a.localizedAspectName)
+      .map((a) => ({
+        name: a.localizedAspectName!,
+        required: a.aspectConstraint?.aspectRequired === true,
+      }));
+  } catch (e) {
+    console.warn("[ebay] aspects lookup failed:", (e as Error).message);
+    return [];
+  }
+}
+
+function findExistingAspect(
+  specifics: Record<string, string>, required: string,
+): string | null {
+  const key = required.toLowerCase();
+  // Exact case-insensitive match.
+  for (const [k, v] of Object.entries(specifics)) {
+    if (k.toLowerCase() === key && v.trim()) return v.trim();
+  }
+  // Aliased match.
+  const aliases = ASPECT_ALIASES[key] ?? [];
+  for (const alias of aliases) {
+    for (const [k, v] of Object.entries(specifics)) {
+      if (k.toLowerCase() === alias.toLowerCase() && v.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+
+async function fillRequiredAspects(
+  token: EbayTokenRow, categoryId: string, item: ItemRow,
+): Promise<void> {
+  const aspects = await fetchRequiredAspects(token, categoryId);
+  const required = aspects.filter((a) => a.required);
+  if (required.length === 0) return;
+
+  const specifics: Record<string, string> = { ...(item.item_specifics ?? {}) };
+  const filled: string[] = [];
+
+  for (const { name } of required) {
+    // Already present (case-insensitive)?
+    const existing = Object.keys(specifics).find((k) => k.toLowerCase() === name.toLowerCase());
+    if (existing && specifics[existing]?.trim()) continue;
+
+    const fromAi = findExistingAspect(specifics, name);
+    const heuristic = HEURISTIC_FALLBACKS[name.toLowerCase()];
+    const value = fromAi ?? heuristic ?? "N/A";
+    specifics[name] = value;
+    filled.push(`${name}=${value}`);
+  }
+
+  if (filled.length) {
+    console.log("[ebay] filled required aspects:", filled.join(", "));
+    item.item_specifics = specifics;
+  }
+}
+
 async function publicPhotoUrls(itemId: string): Promise<string[]> {
   const db = createServiceClient();
   const { data: photos, error } = await db.from("photos")
@@ -229,6 +331,10 @@ export async function publishItem(userId: string, itemId: string): Promise<{
     item.category_id = leaf;
     await db.from("items").update({ category_id: leaf }).eq("id", itemId);
   }
+
+  // Fill any required item specifics for the (possibly updated) leaf category.
+  await fillRequiredAspects(token, item.category_id!, item);
+  await db.from("items").update({ item_specifics: item.item_specifics ?? {} }).eq("id", itemId);
 
   const result = await addFixedPriceItem(token, item, imageUrls);
   if (!result.ok) throw new Error(result.message);
