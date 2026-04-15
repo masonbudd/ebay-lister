@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { generateListing, cleanTitle } from "@/lib/ai/listing";
+import { suggestMarketPrice } from "@/lib/ebay/pricing";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -39,16 +40,25 @@ export async function POST(req: Request) {
     }));
 
     const { listing, raw } = await generateListing(images);
+    const title = cleanTitle(listing.title ?? "");
+
+    // Market-anchored price using eBay PROD Browse API (uses app-only OAuth).
+    const suggestion = await suggestMarketPrice(
+      Number(listing.price_gbp) || 0,
+      title,
+      listing.condition,
+    );
 
     await supabase.from("items").update({
       status: "draft",
-      title: cleanTitle(listing.title ?? ""),
+      title,
       description: listing.description,
       condition: listing.condition,
       category_id: listing.category_id ?? null,
       category_name: listing.category_name ?? null,
-      price: listing.price_gbp,
-      price_is_estimate: listing.price_is_estimate,
+      price: suggestion.price,
+      price_is_estimate: suggestion.is_estimate,
+      price_reasoning: suggestion.reasoning,
       currency: "GBP",
       item_specifics: listing.item_specifics ?? {},
       ai_raw_response: raw as object,

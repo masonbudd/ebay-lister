@@ -15,6 +15,7 @@ type Item = {
   category_name: string | null;
   price: number | null;
   price_is_estimate: boolean | null;
+  price_reasoning: string | null;
   currency: string | null;
   item_specifics: Record<string, string> | null;
   ai_confidence: string | null;
@@ -50,7 +51,7 @@ export default function ItemCard({
     const timer = setInterval(async () => {
       const { data } = await supabase
         .from("items")
-        .select("id,status,title,description,condition,category_name,price,price_is_estimate,currency,item_specifics,ai_confidence,ai_error,created_at")
+        .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
         .eq("id", item.id).single();
       if (data && data.status !== "processing") {
         setItem(data as Item);
@@ -214,6 +215,19 @@ export default function ItemCard({
             />
           </label>
         </div>
+
+        {item.price_reasoning && (
+          <div
+            className="text-xs px-3 py-2 rounded-lg"
+            style={{
+              background: item.price_is_estimate ? "rgba(245,158,11,0.08)" : "rgba(59,130,246,0.08)",
+              border: `1px solid ${item.price_is_estimate ? "rgba(245,158,11,0.25)" : "rgba(59,130,246,0.25)"}`,
+              color: item.price_is_estimate ? "#fbbf24" : "#93c5fd",
+            }}
+          >
+            {item.price_reasoning}
+          </div>
+        )}
 
         {Object.keys(specifics).length > 0 && (
           <details className="text-sm">

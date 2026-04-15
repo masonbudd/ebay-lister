@@ -9,7 +9,7 @@ export default async function ReviewPage() {
   const supabase = await createClient();
   const { data: items } = await supabase
     .from("items")
-    .select("id,status,title,description,condition,category_name,price,price_is_estimate,currency,item_specifics,ai_confidence,ai_error,created_at")
+    .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
     .in("status", ["processing", "draft"])
     .order("created_at", { ascending: false });
 
