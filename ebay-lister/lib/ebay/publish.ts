@@ -1,8 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { ebayFetch } from "./client";
 import { ebayFor } from "./client";
-import { ensureMerchantLocation } from "./setup";
-import { EBAY_CURRENCY, EBAY_MARKETPLACE, EBAY_ENV } from "./config";
+import { EBAY_CURRENCY, EBAY_ENV, ebayCredentials } from "./config";
+import type { EbayTokenRow } from "./tokens";
 
 type ItemRow = {
   id: string;
@@ -16,29 +15,37 @@ type ItemRow = {
   ebay_offer_id: string | null;
 };
 
-// Inventory API uses conditionEnum values, not numeric condition IDs.
-const CONDITION_MAP: Record<string, string> = {
-  "New": "NEW",
-  "Like New": "LIKE_NEW",
-  "Very Good": "USED_VERY_GOOD",
-  "Good": "USED_GOOD",
-  "Acceptable": "USED_ACCEPTABLE",
+// Trading API uses numeric ConditionID values.
+const CONDITION_ID: Record<string, string> = {
+  "New": "1000",
+  "Like New": "1500",
+  "Very Good": "4000",
+  "Good": "5000",
+  "Acceptable": "6000",
 };
 
-function skuFor(itemId: string) {
-  return `ITEM-${itemId.replace(/-/g, "").slice(0, 24).toUpperCase()}`;
+const TRADING_ENDPOINT =
+  EBAY_ENV === "production"
+    ? "https://api.ebay.com/ws/api.dll"
+    : "https://api.sandbox.ebay.com/ws/api.dll";
+
+const SITE_ID_UK = "3";
+const COMPAT_LEVEL = "1193";
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-function toAspects(specifics: Record<string, string> | null): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  for (const [k, v] of Object.entries(specifics ?? {})) {
-    if (typeof v === "string" && v.trim().length) out[k] = [v.trim()];
-  }
-  return out;
+function cdata(s: string): string {
+  // Safely wrap HTML/description in CDATA.
+  return `<![CDATA[${s.replace(/]]>/g, "]]]]><![CDATA[>")}]]>`;
 }
 
-// eBay's imageUrls field limits URL length (and signed URLs blow past it).
-// Use Supabase's short public URL format: the `item-photos` bucket must be PUBLIC.
 async function publicPhotoUrls(itemId: string): Promise<string[]> {
   const db = createServiceClient();
   const { data: photos, error } = await db.from("photos")
@@ -52,49 +59,129 @@ async function publicPhotoUrls(itemId: string): Promise<string[]> {
   });
 }
 
-// Create an offer; if eBay says one already exists for this SKU, look it up and
-// update it so the latest item data is applied before publishing.
-async function resolveOfferId(
-  token: Parameters<typeof ebayFetch>[0],
-  sku: string,
-  item: ItemRow,
-  offerBody: Record<string, unknown>,
-): Promise<string> {
-  // Prefer an id we've already persisted from a prior attempt.
-  if (item.ebay_offer_id) {
-    try {
-      await ebayFetch(token, `/sell/inventory/v1/offer/${item.ebay_offer_id}`, {
-        method: "PUT", body: offerBody, allowEmpty: true,
-      });
-      return item.ebay_offer_id;
-    } catch (e) {
-      // Stale id (e.g. offer was deleted) — fall through to POST / lookup.
-      console.warn("[ebay] stored offerId PUT failed, falling back:", (e as Error).message);
-    }
-  }
+function buildAddFixedPriceItemXml(item: ItemRow, imageUrls: string[]): string {
+  const title = escapeXml((item.title ?? "").slice(0, 80));
+  const description = cdata(item.description ?? "");
+  const conditionId = CONDITION_ID[item.condition ?? ""] ?? "4000";
+  const price = (item.price ?? 0).toFixed(2);
 
-  try {
-    const created = await ebayFetch<{ offerId: string }>(
-      token, "/sell/inventory/v1/offer",
-      { method: "POST", body: offerBody },
-    );
-    return created.offerId;
-  } catch (e) {
-    const msg = (e as Error).message;
-    const isAlreadyExists = /25002/.test(msg) || /already exists/i.test(msg);
-    if (!isAlreadyExists) throw e;
+  const pictureUrls = imageUrls.map((u) => `<PictureURL>${escapeXml(u)}</PictureURL>`).join("");
 
-    // Look up the existing offer for this SKU and PUT the updated body.
-    const list = await ebayFetch<{ offers?: { offerId: string; sku: string }[] }>(
-      token, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
-    );
-    const existing = (list.offers ?? []).find((o) => o.sku === sku);
-    if (!existing) throw new Error(`25002 but offer lookup empty for sku ${sku}`);
-    await ebayFetch(token, `/sell/inventory/v1/offer/${existing.offerId}`, {
-      method: "PUT", body: offerBody, allowEmpty: true,
+  const specifics = Object.entries(item.item_specifics ?? {})
+    .filter(([, v]) => typeof v === "string" && v.trim().length > 0)
+    .map(([k, v]) =>
+      `<NameValueList><Name>${escapeXml(k)}</Name><Value>${escapeXml(v)}</Value></NameValueList>`,
+    )
+    .join("");
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_GB</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+  <Item>
+    <Title>${title}</Title>
+    <Description>${description}</Description>
+    <PrimaryCategory><CategoryID>${escapeXml(item.category_id ?? "")}</CategoryID></PrimaryCategory>
+    <StartPrice currencyID="${EBAY_CURRENCY}">${price}</StartPrice>
+    <ConditionID>${conditionId}</ConditionID>
+    <Country>GB</Country>
+    <Currency>${EBAY_CURRENCY}</Currency>
+    <Location>Liverpool</Location>
+    <Site>UK</Site>
+    <ListingDuration>GTC</ListingDuration>
+    <ListingType>FixedPriceItem</ListingType>
+    <Quantity>1</Quantity>
+    <DispatchTimeMax>1</DispatchTimeMax>
+    ${pictureUrls ? `<PictureDetails>${pictureUrls}</PictureDetails>` : ""}
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
+        <ShippingServiceCost currencyID="${EBAY_CURRENCY}">3.99</ShippingServiceCost>
+        <ShippingServiceAdditionalCost currencyID="${EBAY_CURRENCY}">0.00</ShippingServiceAdditionalCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>
+    ${specifics ? `<ItemSpecifics>${specifics}</ItemSpecifics>` : ""}
+  </Item>
+</AddFixedPriceItemRequest>`;
+}
+
+type TradingResult =
+  | { ok: true; itemId: string; fee: string | null }
+  | { ok: false; message: string };
+
+function extractTag(xml: string, tag: string): string | null {
+  const m = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+  return m ? m[1].trim() : null;
+}
+
+function extractAllErrors(xml: string): { code: string; short: string; long: string; severity: string }[] {
+  const out: { code: string; short: string; long: string; severity: string }[] = [];
+  const re = /<Errors>([\s\S]*?)<\/Errors>/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const chunk = m[1];
+    out.push({
+      code: extractTag(chunk, "ErrorCode") ?? "",
+      short: extractTag(chunk, "ShortMessage") ?? "",
+      long: extractTag(chunk, "LongMessage") ?? "",
+      severity: extractTag(chunk, "SeverityCode") ?? "",
     });
-    return existing.offerId;
   }
+  return out;
+}
+
+async function callTradingApi(token: EbayTokenRow, callName: string, xml: string): Promise<string> {
+  const { clientId, clientSecret } = ebayCredentials();
+  // clientSecret = CertID, clientId = AppID. DevID is separate.
+  const devId = process.env[`EBAY_${EBAY_ENV === "production" ? "PROD" : "SANDBOX"}_DEV_ID`];
+  if (!devId) throw new Error("Missing eBay DEV_ID env var");
+
+  const res = await fetch(TRADING_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml; charset=utf-8",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-APP-NAME": clientId,
+      "X-EBAY-API-DEV-NAME": devId,
+      "X-EBAY-API-CERT-NAME": clientSecret,
+      "X-EBAY-API-IAF-TOKEN": token.access_token,
+    },
+    body: xml,
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Trading ${callName} ${res.status}: ${text.slice(0, 600)}`);
+  return text;
+}
+
+async function addFixedPriceItem(token: EbayTokenRow, item: ItemRow, imageUrls: string[]): Promise<TradingResult> {
+  const xml = buildAddFixedPriceItemXml(item, imageUrls);
+  const response = await callTradingApi(token, "AddFixedPriceItem", xml);
+
+  const ack = extractTag(response, "Ack");
+  const itemId = extractTag(response, "ItemID");
+  const errors = extractAllErrors(response);
+
+  if ((ack === "Success" || ack === "Warning") && itemId) {
+    const fee = extractTag(response, "ListingFee");
+    if (errors.length) {
+      console.warn("[ebay] Trading API warnings:", errors);
+    }
+    return { ok: true, itemId, fee };
+  }
+
+  const message = errors.length
+    ? errors.map((e) => `[${e.code}] ${e.short}${e.long ? ` — ${e.long}` : ""}`).join("; ")
+    : `Trading API returned Ack=${ack ?? "?"} with no ItemID`;
+  return { ok: false, message };
 }
 
 export async function publishItem(userId: string, itemId: string): Promise<{
@@ -111,99 +198,25 @@ export async function publishItem(userId: string, itemId: string): Promise<{
     throw new Error("Item is missing title, description, price, condition, or category_id");
   }
 
-  let token = await ebayFor(userId);
-  token = await ensureMerchantLocation(userId, token);
-  // Sandbox sellers aren't eligible for Business Policies — skip policy creation
-  // and set shipping / returns / payment inline on the offer below.
+  const token = await ebayFor(userId);
 
-  const sku = skuFor(item.id);
   const imageUrls = await publicPhotoUrls(item.id);
   if (imageUrls.length === 0) throw new Error("No photos to upload");
 
-  // 1) Create / replace inventory item
-  await ebayFetch(token, `/sell/inventory/v1/inventory_item/${sku}`, {
-    method: "PUT",
-    body: {
-      availability: { shipToLocationAvailability: { quantity: 1 } },
-      condition: CONDITION_MAP[item.condition] ?? "USED_VERY_GOOD",
-      product: {
-        title: item.title.slice(0, 80),
-        description: item.description,
-        aspects: toAspects(item.item_specifics),
-        imageUrls,
-      },
-    },
-    allowEmpty: true,
-  });
-
-  // 2) Create (or look up + update) offer — inline shipping / return / payment terms.
-  const offerBody = {
-    sku,
-    marketplaceId: EBAY_MARKETPLACE,
-    format: "FIXED_PRICE",
-    availableQuantity: 1,
-    categoryId: item.category_id,
-    listingDescription: item.description,
-    merchantLocationKey: token.merchant_location_key,
-    pricingSummary: {
-      price: { value: item.price.toFixed(2), currency: EBAY_CURRENCY },
-    },
-    // Inline fulfilment config (sandbox sellers can't use Business Policies).
-    fulfillmentPolicy: {
-      freightShipping: false,
-      localPickup: false,
-      handlingTime: { value: 1, unit: "DAY" },
-      shippingOptions: [
-        {
-          optionType: "DOMESTIC",
-          costType: "FLAT_RATE",
-          shippingServices: [
-            {
-              sortOrder: 1,
-              shippingCarrierCode: "RoyalMail",
-              shippingServiceCode: "UK_RoyalMailSecondClassStandard",
-              shippingCost: { value: "0.00", currency: EBAY_CURRENCY },
-              additionalShippingCost: { value: "0.00", currency: EBAY_CURRENCY },
-              freeShipping: false,
-              buyerResponsibleForShipping: true,
-            },
-          ],
-        },
-      ],
-    },
-    returnTerms: {
-      returnsAccepted: true,
-      refundMethod: "MONEY_BACK",
-      returnMethod: "REPLACEMENT_OR_MONEY_BACK",
-      returnPeriod: { value: 30, unit: "DAY" },
-      returnShippingCostPayer: "BUYER",
-    },
-    paymentTerms: { immediatePay: true },
-  };
-
-  const offerId = await resolveOfferId(token, sku, item, offerBody);
-  // Persist immediately so a later retry skips straight to publish.
-  if (offerId !== item.ebay_offer_id) {
-    await db.from("items").update({ ebay_offer_id: offerId }).eq("id", itemId);
-  }
-
-  // 3) Publish offer
-  const published = await ebayFetch<{ listingId: string }>(
-    token, `/sell/inventory/v1/offer/${offerId}/publish`,
-    { method: "POST" },
-  );
+  const result = await addFixedPriceItem(token, item, imageUrls);
+  if (!result.ok) throw new Error(result.message);
 
   const listingUrl = EBAY_ENV === "sandbox"
-    ? `https://www.sandbox.ebay.co.uk/itm/${published.listingId}`
-    : `https://www.ebay.co.uk/itm/${published.listingId}`;
+    ? `https://www.sandbox.ebay.co.uk/itm/${result.itemId}`
+    : `https://www.ebay.co.uk/itm/${result.itemId}`;
 
   await db.from("items").update({
     status: "listed",
-    ebay_listing_id: published.listingId,
+    ebay_listing_id: result.itemId,
     ebay_listing_url: listingUrl,
     ebay_listing_status: "ACTIVE",
     ebay_error: null,
   }).eq("id", itemId);
 
-  return { listingId: published.listingId, listingUrl };
+  return { listingId: result.itemId, listingUrl };
 }
