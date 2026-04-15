@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { ebayFor } from "./client";
+import { ebayFetch, ebayFor } from "./client";
 import { EBAY_CURRENCY, EBAY_ENV, ebayCredentials } from "./config";
 import type { EbayTokenRow } from "./tokens";
 
@@ -44,6 +44,24 @@ function escapeXml(s: string): string {
 function cdata(s: string): string {
   // Safely wrap HTML/description in CDATA.
   return `<![CDATA[${s.replace(/]]>/g, "]]]]><![CDATA[>")}]]>`;
+}
+
+// Look up a leaf category for the item title via the Taxonomy API.
+// Tree id 3 = EBAY_GB. Returns null on any failure so callers can fall back.
+async function suggestLeafCategory(token: EbayTokenRow, title: string): Promise<string | null> {
+  try {
+    const path = `/commerce/taxonomy/v1/category_tree/3/get_category_suggestions?q=${encodeURIComponent(title)}`;
+    const resp = await ebayFetch<{
+      categorySuggestions?: {
+        category?: { categoryId?: string; categoryName?: string };
+      }[];
+    }>(token, path);
+    const first = resp.categorySuggestions?.[0]?.category?.categoryId;
+    return first ?? null;
+  } catch (e) {
+    console.warn("[ebay] taxonomy lookup failed, falling back to AI category:", (e as Error).message);
+    return null;
+  }
 }
 
 async function publicPhotoUrls(itemId: string): Promise<string[]> {
@@ -202,6 +220,15 @@ export async function publishItem(userId: string, itemId: string): Promise<{
 
   const imageUrls = await publicPhotoUrls(item.id);
   if (imageUrls.length === 0) throw new Error("No photos to upload");
+
+  // Resolve a real leaf category from the Taxonomy API before publishing —
+  // the AI-suggested id is often a branch node that Trading API rejects.
+  const leaf = await suggestLeafCategory(token, item.title!);
+  if (leaf && leaf !== item.category_id) {
+    console.log(`[ebay] category ${item.category_id} -> leaf ${leaf}`);
+    item.category_id = leaf;
+    await db.from("items").update({ category_id: leaf }).eq("id", itemId);
+  }
 
   const result = await addFixedPriceItem(token, item, imageUrls);
   if (!result.ok) throw new Error(result.message);
