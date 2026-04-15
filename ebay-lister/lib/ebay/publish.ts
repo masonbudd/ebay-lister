@@ -148,14 +148,26 @@ export async function publishItem(userId: string, itemId: string): Promise<{
     pricingSummary: {
       price: { value: item.price.toFixed(2), currency: EBAY_CURRENCY },
     },
-    listingPolicies: {
-      shippingCostOverrides: [
+    // Inline fulfilment config (sandbox sellers can't use Business Policies).
+    fulfillmentPolicy: {
+      freightShipping: false,
+      localPickup: false,
+      handlingTime: { value: 1, unit: "DAY" },
+      shippingOptions: [
         {
-          surcharge: { value: "0.00", currency: EBAY_CURRENCY },
-          shippingCost: { value: "3.99", currency: EBAY_CURRENCY },
-          additionalShippingCost: { value: "0.00", currency: EBAY_CURRENCY },
-          shippingServiceType: "DOMESTIC",
-          priority: 1,
+          optionType: "DOMESTIC",
+          costType: "FLAT_RATE",
+          shippingServices: [
+            {
+              sortOrder: 1,
+              shippingCarrierCode: "RoyalMail",
+              shippingServiceCode: "UK_RoyalMailSecondClassStandard",
+              shippingCost: { value: "0.00", currency: EBAY_CURRENCY },
+              additionalShippingCost: { value: "0.00", currency: EBAY_CURRENCY },
+              freeShipping: false,
+              buyerResponsibleForShipping: true,
+            },
+          ],
         },
       ],
     },
