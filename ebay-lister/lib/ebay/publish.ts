@@ -179,6 +179,31 @@ async function publicPhotoUrls(itemId: string): Promise<string[]> {
   });
 }
 
+const ASPECT_MAX_LEN = 65;
+
+// eBay rejects item-specific values over 65 chars. Truncate cleanly; for Author
+// fields, keep the first 1–2 authors and append "et al." when needed.
+function sanitiseAspectValue(name: string, raw: string): string {
+  const value = raw.trim();
+  if (value.length <= ASPECT_MAX_LEN) return value;
+
+  if (name.toLowerCase() === "author") {
+    const authors = value.split(/\s*(?:,|;|\band\b|&)\s*/i).filter(Boolean);
+    for (const n of [2, 1]) {
+      const candidate = `${authors.slice(0, n).join(", ")} et al.`;
+      if (candidate.length <= ASPECT_MAX_LEN) return candidate;
+    }
+    // Single author name longer than 65 chars — fall through to hard truncation.
+  }
+
+  // Word-boundary trim, reserving space for the ellipsis.
+  const cap = ASPECT_MAX_LEN - 1;
+  const sliced = value.slice(0, cap);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const trimmed = lastSpace > 30 ? sliced.slice(0, lastSpace) : sliced;
+  return `${trimmed.trimEnd()}…`;
+}
+
 function buildAddFixedPriceItemXml(item: ItemRow, imageUrls: string[]): string {
   const title = escapeXml((item.title ?? "").slice(0, 80));
   const description = cdata(item.description ?? "");
@@ -189,9 +214,10 @@ function buildAddFixedPriceItemXml(item: ItemRow, imageUrls: string[]): string {
 
   const specifics = Object.entries(item.item_specifics ?? {})
     .filter(([, v]) => typeof v === "string" && v.trim().length > 0)
-    .map(([k, v]) =>
-      `<NameValueList><Name>${escapeXml(k)}</Name><Value>${escapeXml(v)}</Value></NameValueList>`,
-    )
+    .map(([k, v]) => {
+      const value = sanitiseAspectValue(k, v);
+      return `<NameValueList><Name>${escapeXml(k)}</Name><Value>${escapeXml(value)}</Value></NameValueList>`;
+    })
     .join("");
 
   return `<?xml version="1.0" encoding="utf-8"?>
