@@ -13,6 +13,7 @@ type ItemRow = {
   category_id: string | null;
   price: number | null;
   item_specifics: Record<string, string> | null;
+  ebay_offer_id: string | null;
 };
 
 // Inventory API uses conditionEnum values, not numeric condition IDs.
@@ -51,12 +52,57 @@ async function publicPhotoUrls(itemId: string): Promise<string[]> {
   });
 }
 
+// Create an offer; if eBay says one already exists for this SKU, look it up and
+// update it so the latest item data is applied before publishing.
+async function resolveOfferId(
+  token: Parameters<typeof ebayFetch>[0],
+  sku: string,
+  item: ItemRow,
+  offerBody: Record<string, unknown>,
+): Promise<string> {
+  // Prefer an id we've already persisted from a prior attempt.
+  if (item.ebay_offer_id) {
+    try {
+      await ebayFetch(token, `/sell/inventory/v1/offer/${item.ebay_offer_id}`, {
+        method: "PUT", body: offerBody, allowEmpty: true,
+      });
+      return item.ebay_offer_id;
+    } catch (e) {
+      // Stale id (e.g. offer was deleted) — fall through to POST / lookup.
+      console.warn("[ebay] stored offerId PUT failed, falling back:", (e as Error).message);
+    }
+  }
+
+  try {
+    const created = await ebayFetch<{ offerId: string }>(
+      token, "/sell/inventory/v1/offer",
+      { method: "POST", body: offerBody },
+    );
+    return created.offerId;
+  } catch (e) {
+    const msg = (e as Error).message;
+    const isAlreadyExists = /25002/.test(msg) || /already exists/i.test(msg);
+    if (!isAlreadyExists) throw e;
+
+    // Look up the existing offer for this SKU and PUT the updated body.
+    const list = await ebayFetch<{ offers?: { offerId: string; sku: string }[] }>(
+      token, `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+    );
+    const existing = (list.offers ?? []).find((o) => o.sku === sku);
+    if (!existing) throw new Error(`25002 but offer lookup empty for sku ${sku}`);
+    await ebayFetch(token, `/sell/inventory/v1/offer/${existing.offerId}`, {
+      method: "PUT", body: offerBody, allowEmpty: true,
+    });
+    return existing.offerId;
+  }
+}
+
 export async function publishItem(userId: string, itemId: string): Promise<{
   listingId: string; listingUrl: string;
 }> {
   const db = createServiceClient();
   const { data: row, error } = await db.from("items")
-    .select("id,user_id,title,description,condition,category_id,price,item_specifics")
+    .select("id,user_id,title,description,condition,category_id,price,item_specifics,ebay_offer_id")
     .eq("id", itemId).single();
   if (error || !row) throw new Error("item not found");
   const item = row as ItemRow;
@@ -90,50 +136,48 @@ export async function publishItem(userId: string, itemId: string): Promise<{
     allowEmpty: true,
   });
 
-  // 2) Create offer — inline shipping / return / payment terms (no business policies)
-  const offer = await ebayFetch<{ offerId: string }>(token, "/sell/inventory/v1/offer", {
-    method: "POST",
-    body: {
-      sku,
-      marketplaceId: EBAY_MARKETPLACE,
-      format: "FIXED_PRICE",
-      availableQuantity: 1,
-      categoryId: item.category_id,
-      listingDescription: item.description,
-      merchantLocationKey: token.merchant_location_key,
-      pricingSummary: {
-        price: { value: item.price.toFixed(2), currency: EBAY_CURRENCY },
-      },
-      // Buyer pays Royal Mail 2nd Class.
-      listingPolicies: {
-        shippingCostOverrides: [
-          {
-            surcharge: { value: "0.00", currency: EBAY_CURRENCY },
-            shippingCost: { value: "3.99", currency: EBAY_CURRENCY },
-            additionalShippingCost: { value: "0.00", currency: EBAY_CURRENCY },
-            shippingServiceType: "DOMESTIC",
-            priority: 1,
-          },
-        ],
-      },
-      // 30-day returns, buyer pays return postage.
-      returnTerms: {
-        returnsAccepted: true,
-        refundMethod: "MONEY_BACK",
-        returnMethod: "REPLACEMENT_OR_MONEY_BACK",
-        returnPeriod: { value: 30, unit: "DAY" },
-        returnShippingCostPayer: "BUYER",
-      },
-      // Managed payments on eBay UK — immediate pay, no further config needed.
-      paymentTerms: {
-        immediatePay: true,
-      },
+  // 2) Create (or look up + update) offer — inline shipping / return / payment terms.
+  const offerBody = {
+    sku,
+    marketplaceId: EBAY_MARKETPLACE,
+    format: "FIXED_PRICE",
+    availableQuantity: 1,
+    categoryId: item.category_id,
+    listingDescription: item.description,
+    merchantLocationKey: token.merchant_location_key,
+    pricingSummary: {
+      price: { value: item.price.toFixed(2), currency: EBAY_CURRENCY },
     },
-  });
+    listingPolicies: {
+      shippingCostOverrides: [
+        {
+          surcharge: { value: "0.00", currency: EBAY_CURRENCY },
+          shippingCost: { value: "3.99", currency: EBAY_CURRENCY },
+          additionalShippingCost: { value: "0.00", currency: EBAY_CURRENCY },
+          shippingServiceType: "DOMESTIC",
+          priority: 1,
+        },
+      ],
+    },
+    returnTerms: {
+      returnsAccepted: true,
+      refundMethod: "MONEY_BACK",
+      returnMethod: "REPLACEMENT_OR_MONEY_BACK",
+      returnPeriod: { value: 30, unit: "DAY" },
+      returnShippingCostPayer: "BUYER",
+    },
+    paymentTerms: { immediatePay: true },
+  };
+
+  const offerId = await resolveOfferId(token, sku, item, offerBody);
+  // Persist immediately so a later retry skips straight to publish.
+  if (offerId !== item.ebay_offer_id) {
+    await db.from("items").update({ ebay_offer_id: offerId }).eq("id", itemId);
+  }
 
   // 3) Publish offer
   const published = await ebayFetch<{ listingId: string }>(
-    token, `/sell/inventory/v1/offer/${offer.offerId}/publish`,
+    token, `/sell/inventory/v1/offer/${offerId}/publish`,
     { method: "POST" },
   );
 
