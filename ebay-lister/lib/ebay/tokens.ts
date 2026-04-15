@@ -56,10 +56,13 @@ export async function exchangeAuthCode(code: string): Promise<{
   access_token: string; refresh_token: string; expires_in: number; refresh_token_expires_in: number;
 }> {
   const { token } = ebayEndpoints();
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not set");
+  const redirectUri = `${appUrl.replace(/\/$/, "")}/api/ebay/callback`;
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: process.env[`EBAY_${EBAY_ENV === "production" ? "PROD" : "SANDBOX"}_REDIRECT_URI`]!,
+    redirect_uri: redirectUri,
   });
   const res = await fetch(token, {
     method: "POST",

@@ -12,13 +12,16 @@ export async function GET() {
   if (!user) return NextResponse.redirect(new URL("/login", "http://localhost"));
 
   const { authorize } = ebayEndpoints();
-  const { clientId, redirectUri } = ebayCredentials();
+  const { clientId } = ebayCredentials();
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not set");
+  const redirectUri = `${appUrl.replace(/\/$/, "")}/api/ebay/callback`;
 
   const state = crypto.randomUUID();
-  // Persist state in a cookie on this response to verify on callback.
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: redirectUri,   // this is the RuName for authorize
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: EBAY_SCOPES,
     state,
