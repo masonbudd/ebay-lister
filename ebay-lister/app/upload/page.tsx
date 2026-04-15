@@ -38,6 +38,9 @@ export default function UploadPage() {
   const [submittedCount, setSubmittedCount] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Per-item upload work, keyed by dbId. nextItem() awaits this in the background
+  // so the UI can move on while uploads finish.
+  const pendingUploads = useRef<Map<string, Promise<void>>>(new Map());
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data, error }) => {
@@ -135,16 +138,14 @@ export default function UploadPage() {
       return;
     }
 
-    await Promise.all(list.map(async (file, i) => {
+    // Parallel per-photo work. Update state only if the user is still on this item
+    // (they may have tapped "Next item" and moved on — the upload still completes
+    // in the background, we just don't mutate the new draft's tiles).
+    const uploadTask = Promise.all(list.map(async (file, i) => {
       const idx = startIdx + i;
       try {
-        console.log(`[upload] [${idx}] compressing`, file.name, file.type, file.size);
         const compressed = await compressForUpload(file);
-        console.log(`[upload] [${idx}] compressed ->`, compressed.type, compressed.size);
-
-        // Path must match RLS policy: {user_id}/{item_id}/{filename}
         const path = `${userId}/${itemId}/${uuid()}.jpg`;
-        console.log(`[upload] [${idx}] uploading to`, path);
 
         const { error: upErr } = await supabase.storage
           .from("item-photos")
@@ -153,24 +154,17 @@ export default function UploadPage() {
             upsert: false,
             cacheControl: "3600",
           });
-        if (upErr) {
-          console.error(`[upload] [${idx}] storage error:`, toMessage(upErr), upErr);
-          throw new Error(`storage: ${toMessage(upErr)}`);
-        }
-        console.log(`[upload] [${idx}] storage ok`);
+        if (upErr) throw new Error(`storage: ${toMessage(upErr)}`);
 
         const { data: photoRow, error: insErr } = await supabase
           .from("photos")
           .insert({ item_id: itemId, storage_path: path, sort_order: idx })
           .select("id")
           .single();
-        if (insErr) {
-          console.error(`[upload] [${idx}] photos insert error:`, toMessage(insErr), insErr);
-          throw new Error(`photos insert: ${toMessage(insErr)}`);
-        }
-        console.log(`[upload] [${idx}] photos row`, photoRow.id);
+        if (insErr) throw new Error(`photos insert: ${toMessage(insErr)}`);
 
         setCurrent((d) => {
+          if (d.dbId !== itemId) return d;
           const photos = [...d.photos];
           photos[idx] = { ...photos[idx], id: photoRow.id, uploading: false };
           return { ...d, photos };
@@ -179,39 +173,51 @@ export default function UploadPage() {
         const msg = toMessage(err);
         console.error(`[upload] [${idx}] failed:`, msg);
         setCurrent((d) => {
+          if (d.dbId !== itemId) return d;
           const photos = [...d.photos];
           photos[idx] = { ...photos[idx], uploading: false, error: msg };
           return { ...d, photos };
         });
       }
-    }));
+    })).then(() => undefined);
+
+    // Chain after any previous pending work for this item so nextItem() awaits everything.
+    const prev = pendingUploads.current.get(itemId);
+    const chained = prev ? prev.then(() => uploadTask) : uploadTask;
+    pendingUploads.current.set(itemId, chained);
+    await uploadTask;
   }, [current, ensureItemRow, supabase, userId]);
 
-  const nextItem = useCallback(async () => {
+  const nextItem = useCallback(() => {
     if (!current.dbId || current.photos.length === 0) {
       setCurrent(newDraft());
       return;
     }
-    const anyUploading = current.photos.some((p) => p.uploading);
-    if (anyUploading) {
-      setToast("Still uploading — wait a sec.");
-      setTimeout(() => setToast(null), 1500);
-      return;
-    }
-    // Flip to processing and kick off AI (fire-and-forget).
-    const { error: updErr } = await supabase.from("items")
-      .update({ status: "processing" }).eq("id", current.dbId);
-    if (updErr) console.error("[upload] mark processing failed:", toMessage(updErr), updErr);
-    fetch("/api/process", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ itemId: current.dbId }),
-    }).catch(() => {});
+    const itemId = current.dbId;
+    // Move to a fresh item immediately — uploads and AI kickoff continue in the background.
     setSubmittedCount((n) => n + 1);
     setCurrent(newDraft());
+
+    (async () => {
+      try {
+        await pendingUploads.current.get(itemId);
+      } catch (e) {
+        console.warn("[upload] background upload errored for", itemId, e);
+      } finally {
+        pendingUploads.current.delete(itemId);
+      }
+      const { error: updErr } = await supabase.from("items")
+        .update({ status: "processing" }).eq("id", itemId);
+      if (updErr) console.error("[upload] mark processing failed:", toMessage(updErr), updErr);
+      fetch("/api/process", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ itemId }),
+      }).catch(() => {});
+    })();
   }, [current, supabase]);
 
-  const canSubmit = current.photos.length > 0 && current.photos.every((p) => !p.uploading);
+  const canSubmit = current.photos.length > 0;
 
   const hasPhotos = current.photos.length > 0;
 
