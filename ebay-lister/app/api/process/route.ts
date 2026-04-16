@@ -69,7 +69,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await supabase.from("items").update({ status: "draft", ai_error: message }).eq("id", itemId);
+    // Hard-failure fallback: photos are still in storage, so surface the item in the
+    // review queue with a manual-edit placeholder instead of leaving it silently broken.
+    await supabase.from("items").update({
+      status: "draft",
+      title: "Unidentified Item - Please Edit",
+      description: "",
+      price_is_estimate: true,
+      ai_error: message,
+    }).eq("id", itemId);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

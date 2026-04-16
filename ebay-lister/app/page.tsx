@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PlusIcon } from "@/components/Icons";
 import PullToRefresh from "@/components/PullToRefresh";
 import DashboardActions from "./DashboardActions";
+import { reclaimStuckProcessing } from "@/lib/items";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ const CARDS = [
 
 export default async function Home() {
   const supabase = await createClient();
+  await reclaimStuckProcessing(supabase);
   const counts = await Promise.all(
     CARDS.map(async ({ key }) => {
       const { count } = await supabase

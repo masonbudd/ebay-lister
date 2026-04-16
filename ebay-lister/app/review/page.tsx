@@ -2,11 +2,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signedUrlsFor } from "@/lib/photos";
 import ReviewList from "./ReviewList";
+import { reclaimStuckProcessing } from "@/lib/items";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReviewPage() {
   const supabase = await createClient();
+  await reclaimStuckProcessing(supabase);
   const { data: items } = await supabase
     .from("items")
     .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")

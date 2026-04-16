@@ -24,7 +24,8 @@ Rules:
 - Condition must be one of: "New", "Like New", "Very Good", "Good", "Acceptable".
 - Item specifics should be appropriate to the category (books -> Author/Publisher/ISBN/Format/Language/Topic/Publication Year/Edition; magazines -> Title/Issue Number/Publication Date/Language/Topic; ornaments -> Brand/Material/Type/Theme/Colour/Dimensions).
 - Price: estimate a reasonable GBP price based on the item and typical eBay UK market value; set price_is_estimate=true unless you are highly confident. Price must be a positive GBP number.
-- If you cannot confidently identify the item, set confidence="low" and still produce the best draft you can.
+- If you cannot identify the exact product, DO NOT return an error or empty fields. Describe what you can actually see in detail — type of item, material, colour, size, brand if visible, any readable text or labels. Use those visual details to produce a usable, descriptive title and description. For furniture and household items: describe style, material, estimated dimensions, and distinguishing features. Always produce a complete, listable draft from whatever is visible. Set confidence="low" when you're working from visual description only.
+- Never return an error, a placeholder like "Unknown item", or an empty title/description. A best-effort visual description is always better than nothing.
 
 Respond with ONLY a single JSON object matching this schema (no prose, no markdown fence):
 {
