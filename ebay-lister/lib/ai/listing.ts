@@ -60,6 +60,11 @@ export async function generateListing(
     text: "Analyse these photos and produce the JSON listing draft as instructed.",
   });
 
+  const imagePayloadKb = Math.round(content.reduce((sum, c) =>
+    sum + (c.type === "image_url" ? c.image_url.url.length * 0.75 / 1024 : 0), 0));
+  console.log(`[ai] sending ${images.length} images (~${imagePayloadKb} KB) to ${MODEL}`);
+
+  const t0 = Date.now();
   const res = await fetch(BASE_URL, {
     method: "POST",
     headers: {
@@ -69,7 +74,7 @@ export async function generateListing(
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 600,
       temperature: 0.2,
       messages: [
         { role: "system", content: SYSTEM },
@@ -77,6 +82,8 @@ export async function generateListing(
       ],
     }),
   });
+  const apiMs = Date.now() - t0;
+  console.log(`[ai] NVIDIA response: ${res.status} in ${apiMs}ms`);
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -86,6 +93,7 @@ export async function generateListing(
   const raw = await res.json();
   const text: string | undefined = raw?.choices?.[0]?.message?.content;
   if (!text) throw new Error("No text in model response");
+  console.log(`[ai] response length: ${text.length} chars, usage: ${JSON.stringify(raw?.usage ?? {})}`);
   const listing = parseJSON(text) as AIListing;
   return { listing, raw };
 }

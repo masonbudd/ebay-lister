@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import ItemCard from "./ItemCard";
 import PullToRefresh from "@/components/PullToRefresh";
@@ -17,6 +17,13 @@ export default function ReviewList({
   const supabase = createClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    router.refresh();
+    setTimeout(() => setRefreshing(false), 600);
+  }, [router]);
 
   const draftIds = useMemo(
     () => items.filter((i) => i.status === "draft").map((i) => i.id),
@@ -55,6 +62,16 @@ export default function ReviewList({
 
   return (
     <PullToRefresh>
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="btn"
+          style={{ minHeight: 38, padding: "0 12px", fontSize: 13 }}
+        >
+          {refreshing ? "Refreshing…" : "↻ Refresh"}
+        </button>
+      </div>
       {draftIds.length > 0 && (
         <label
           className="flex items-center gap-3 px-1 text-sm cursor-pointer select-none"

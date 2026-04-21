@@ -30,7 +30,9 @@ export async function POST(req: Request) {
   await supabase.from("items").update({ status: "processing", ai_error: null }).eq("id", itemId);
 
   try {
-    // Use service role to download private objects.
+    const tStart = Date.now();
+
+    // Download photos (bucket is public but use service role for reliability).
     const service = createServiceClient();
     const images = await Promise.all(photos.map(async (p) => {
       const { data, error } = await service.storage.from("item-photos").download(p.storage_path);
@@ -38,16 +40,22 @@ export async function POST(req: Request) {
       const buf = Buffer.from(await data.arrayBuffer());
       return { data: buf.toString("base64"), mediaType: "image/jpeg" };
     }));
+    console.log(`[process] ${itemId} photos downloaded in ${Date.now() - tStart}ms (${images.length} files, ~${Math.round(images.reduce((s, i) => s + i.data.length * 0.75, 0) / 1024)} KB)`);
 
+    const tAI = Date.now();
     const { listing, raw } = await generateListing(images);
+    console.log(`[process] ${itemId} AI done in ${Date.now() - tAI}ms`);
+
     const title = cleanTitle(listing.title ?? "");
 
-    // Market-anchored price using eBay PROD Browse API (uses app-only OAuth).
+    const tPrice = Date.now();
     const suggestion = await suggestMarketPrice(
       Number(listing.price_gbp) || 0,
       title,
       listing.condition,
     );
+    console.log(`[process] ${itemId} pricing done in ${Date.now() - tPrice}ms — £${suggestion.price}`);
+    console.log(`[process] ${itemId} total: ${Date.now() - tStart}ms`);
 
     await supabase.from("items").update({
       status: "draft",

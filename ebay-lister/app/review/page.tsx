@@ -5,15 +5,28 @@ import ReviewList from "./ReviewList";
 import { reclaimStuckProcessing } from "@/lib/items";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function ReviewPage() {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  console.log("[review] user:", user?.id ?? "NO USER");
+
   await reclaimStuckProcessing(supabase);
-  const { data: items } = await supabase
+
+  // Debug: count ALL items for this user regardless of status.
+  const { count: total } = await supabase
+    .from("items").select("*", { count: "exact", head: true });
+  console.log("[review] total items for user:", total);
+
+  const { data: items, error: fetchErr } = await supabase
     .from("items")
     .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
     .in("status", ["processing", "draft"])
     .order("created_at", { ascending: false });
+
+  console.log("[review] fetched", items?.length ?? 0, "items, error:", fetchErr?.message ?? "none");
+  if (items?.length) console.log("[review] first:", items[0].id, items[0].status, items[0].title?.slice(0, 40));
 
   const ids = (items ?? []).map((i) => i.id);
   const { data: photos } = ids.length
