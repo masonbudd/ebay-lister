@@ -38,12 +38,13 @@ export default async function ReviewPage() {
 
   const { data: items, error: qErr } = await db
     .from("items")
-    .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
+    .select("*")
     .eq("user_id", user.id)
     .in("status", REVIEW_STATUSES)
     .order("created_at", { ascending: false });
 
-  console.log(`[review] server render at ${new Date().toISOString()}: user=${user.id.slice(0,8)}, items=${items?.length ?? 0}, error=${qErr?.message ?? "none"}`);
+  console.log(`[review] server render: user=${user.id.slice(0,8)}, items=${items?.length ?? 0}, error=${qErr?.message ?? "none"}`);
+  if (qErr) console.error("[review] QUERY ERROR:", JSON.stringify(qErr));
 
   const ids = (items ?? []).map((i) => i.id);
   const { data: photos } = ids.length
@@ -78,8 +79,9 @@ export default async function ReviewPage() {
       </div>
 
       {/* Debug line — remove once the issue is resolved. */}
-      <p className="text-[10px] font-mono" style={{ color: "var(--fg-dim)" }}>
+      <p className="text-[10px] font-mono" style={{ color: qErr ? "#fca5a5" : "var(--fg-dim)" }}>
         server: {itemCount} items, user: {user.id.slice(0, 8)}, rendered: {now}
+        {qErr && ` — ERROR: ${qErr.message}`}
       </p>
 
       {itemCount === 0 && (

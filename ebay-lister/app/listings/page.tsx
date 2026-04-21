@@ -28,11 +28,10 @@ export default async function ListingsPage() {
   if (!user) return <div className="p-8 text-center" style={{ color: "var(--fg-muted)" }}>Not signed in.</div>;
 
   const db = createServiceClient();
-  const fields = "id,status,title,price,currency,ebay_listing_id,ebay_listing_url,ebay_listing_status,ebay_error,created_at";
 
-  const { data: approved } = await db.from("items").select(fields)
+  const { data: approved } = await db.from("items").select("*")
     .eq("user_id", user.id).eq("status", "approved").order("created_at", { ascending: false });
-  const { data: listed } = await db.from("items").select(fields)
+  const { data: listed } = await db.from("items").select("*")
     .eq("user_id", user.id).in("status", ["listed", "sold"]).order("created_at", { ascending: false });
 
   const approvedItems = (approved ?? []) as ListItem[];
