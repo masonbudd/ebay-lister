@@ -245,8 +245,7 @@ function buildAddFixedPriceItemXml(item: ItemRow, imageUrls: string[]): string {
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
         <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
-        <ShippingServiceCost currencyID="${EBAY_CURRENCY}">3.99</ShippingServiceCost>
-        <ShippingServiceAdditionalCost currencyID="${EBAY_CURRENCY}">0.00</ShippingServiceAdditionalCost>
+        <FreeShipping>true</FreeShipping>
       </ShippingServiceOptions>
     </ShippingDetails>
     <ReturnPolicy>
