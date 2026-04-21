@@ -25,7 +25,8 @@ export default function BottomNav({ draftCount: initial }: { draftCount: number 
     async function tick() {
       if (stop) return;
       const { count } = await supabase.from("items")
-        .select("*", { count: "exact", head: true }).eq("status", "draft");
+        .select("*", { count: "exact", head: true })
+        .in("status", ["uploading", "processing", "draft"]);
       if (!stop && typeof count === "number") setDrafts(count);
     }
     const timer = setInterval(tick, 8000);

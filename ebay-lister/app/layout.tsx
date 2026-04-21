@@ -31,9 +31,10 @@ export const viewport = {
   viewportFit: "cover" as const,
 };
 
-async function draftCount(supabase: Awaited<ReturnType<typeof createClient>>) {
+async function reviewCount(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { count } = await supabase.from("items")
-    .select("*", { count: "exact", head: true }).eq("status", "draft");
+    .select("*", { count: "exact", head: true })
+    .in("status", ["uploading", "processing", "draft"]);
   return count ?? 0;
 }
 
@@ -89,7 +90,7 @@ export default async function RootLayout({
           {children}
         </main>
 
-        {user && <BottomNav draftCount={await draftCount(supabase)} />}
+        {user && <BottomNav draftCount={await reviewCount(supabase)} />}
         </ToastProvider>
       </body>
     </html>

@@ -7,25 +7,40 @@ import { reclaimStuckProcessing } from "@/lib/items";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const REVIEW_STATUSES = ["uploading", "processing", "draft"];
+
 export default async function ReviewPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  console.log("[review] user:", user?.id ?? "NO USER");
+
+  // Critical: force a session refresh so the server client has a valid JWT for RLS.
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  console.log("[review] auth:", user?.id ?? "NO USER", authErr ? `error: ${authErr.message}` : "ok");
+
+  if (!user) {
+    console.error("[review] no user session — RLS will block all queries");
+  }
 
   await reclaimStuckProcessing(supabase);
 
   // Debug: count ALL items for this user regardless of status.
-  const { count: total } = await supabase
+  const { count: total, error: countErr } = await supabase
     .from("items").select("*", { count: "exact", head: true });
-  console.log("[review] total items for user:", total);
+  console.log("[review] total items visible to RLS:", total, countErr ? `error: ${countErr.message}` : "");
+
+  // Count per status for diagnosis.
+  for (const st of ["uploading", "processing", "draft", "approved", "listed", "sold"]) {
+    const { count } = await supabase
+      .from("items").select("*", { count: "exact", head: true }).eq("status", st);
+    if (count && count > 0) console.log(`[review]   status=${st}: ${count}`);
+  }
 
   const { data: items, error: fetchErr } = await supabase
     .from("items")
     .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
-    .in("status", ["processing", "draft"])
+    .in("status", REVIEW_STATUSES)
     .order("created_at", { ascending: false });
 
-  console.log("[review] fetched", items?.length ?? 0, "items, error:", fetchErr?.message ?? "none");
+  console.log("[review] query returned", items?.length ?? 0, "items", fetchErr ? `error: ${fetchErr.message}` : "");
   if (items?.length) console.log("[review] first:", items[0].id, items[0].status, items[0].title?.slice(0, 40));
 
   const ids = (items ?? []).map((i) => i.id);
