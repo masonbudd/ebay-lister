@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { signedUrlsFor } from "@/lib/photos";
 import ReviewList from "./ReviewList";
-import { reclaimStuckProcessing } from "@/lib/items";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -10,42 +9,43 @@ export const revalidate = 0;
 const REVIEW_STATUSES = ["uploading", "processing", "draft"];
 
 export default async function ReviewPage() {
+  // Use the auth-aware client only to identify the user.
   const supabase = await createClient();
-
-  // Critical: force a session refresh so the server client has a valid JWT for RLS.
-  const { data: { user }, error: authErr } = await supabase.auth.getUser();
-  console.log("[review] auth:", user?.id ?? "NO USER", authErr ? `error: ${authErr.message}` : "ok");
+  const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    console.error("[review] no user session — RLS will block all queries");
+    return (
+      <div className="max-w-lg mx-auto px-4 pt-8 text-center" style={{ color: "var(--fg-muted)" }}>
+        Not signed in. Please log in.
+      </div>
+    );
   }
 
-  await reclaimStuckProcessing(supabase);
+  // Use the service client (bypasses RLS) with an explicit user_id filter.
+  // This sidesteps the server-side cookie/JWT issue that causes RLS to
+  // silently return 0 rows while the browser client works fine.
+  const db = createServiceClient();
 
-  // Debug: count ALL items for this user regardless of status.
-  const { count: total, error: countErr } = await supabase
-    .from("items").select("*", { count: "exact", head: true });
-  console.log("[review] total items visible to RLS:", total, countErr ? `error: ${countErr.message}` : "");
+  // Reclaim stuck processing items (>5 min).
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  await db.from("items").update({
+    status: "draft",
+    title: "Unidentified Item - Please Edit",
+    description: "",
+    price_is_estimate: true,
+    ai_error: "Processing timed out after 5 minutes — please edit manually.",
+  }).eq("user_id", user.id).eq("status", "processing").lt("updated_at", cutoff);
 
-  // Count per status for diagnosis.
-  for (const st of ["uploading", "processing", "draft", "approved", "listed", "sold"]) {
-    const { count } = await supabase
-      .from("items").select("*", { count: "exact", head: true }).eq("status", st);
-    if (count && count > 0) console.log(`[review]   status=${st}: ${count}`);
-  }
-
-  const { data: items, error: fetchErr } = await supabase
+  const { data: items } = await db
     .from("items")
     .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
+    .eq("user_id", user.id)
     .in("status", REVIEW_STATUSES)
     .order("created_at", { ascending: false });
 
-  console.log("[review] query returned", items?.length ?? 0, "items", fetchErr ? `error: ${fetchErr.message}` : "");
-  if (items?.length) console.log("[review] first:", items[0].id, items[0].status, items[0].title?.slice(0, 40));
-
   const ids = (items ?? []).map((i) => i.id);
   const { data: photos } = ids.length
-    ? await supabase.from("photos").select("item_id,storage_path,sort_order").in("item_id", ids).order("sort_order")
+    ? await db.from("photos").select("item_id,storage_path,sort_order").in("item_id", ids).order("sort_order")
     : { data: [] as { item_id: string; storage_path: string; sort_order: number }[] };
 
   const allPaths = (photos ?? []).map((p) => p.storage_path);

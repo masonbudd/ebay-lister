@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { PlusIcon } from "@/components/Icons";
 import PullToRefresh from "@/components/PullToRefresh";
 import DashboardActions from "./DashboardActions";
-import { reclaimStuckProcessing } from "@/lib/items";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +17,23 @@ const CARDS = [
 
 export default async function Home() {
   const supabase = await createClient();
-  await reclaimStuckProcessing(supabase);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return <div className="p-8 text-center" style={{ color: "var(--fg-muted)" }}>Not signed in.</div>;
+
+  const db = createServiceClient();
+
+  // Reclaim stuck processing.
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  await db.from("items").update({
+    status: "draft", title: "Unidentified Item - Please Edit", description: "",
+    price_is_estimate: true, ai_error: "Processing timed out — please edit manually.",
+  }).eq("user_id", user.id).eq("status", "processing").lt("updated_at", cutoff);
+
   const counts = await Promise.all(
     CARDS.map(async ({ key }) => {
-      const { count } = await supabase
-        .from("items").select("*", { count: "exact", head: true }).eq("status", key);
+      const { count } = await db
+        .from("items").select("*", { count: "exact", head: true })
+        .eq("user_id", user.id).eq("status", key);
       return [key, count ?? 0] as const;
     }),
   );

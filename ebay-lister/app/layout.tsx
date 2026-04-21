@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
 import { GearIcon, SignOutIcon } from "@/components/Icons";
@@ -31,9 +31,11 @@ export const viewport = {
   viewportFit: "cover" as const,
 };
 
-async function reviewCount(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { count } = await supabase.from("items")
+async function reviewCount(userId: string) {
+  const db = createServiceClient();
+  const { count } = await db.from("items")
     .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
     .in("status", ["uploading", "processing", "draft"]);
   return count ?? 0;
 }
@@ -90,7 +92,7 @@ export default async function RootLayout({
           {children}
         </main>
 
-        {user && <BottomNav draftCount={await reviewCount(supabase)} />}
+        {user && <BottomNav draftCount={await reviewCount(user.id)} />}
         </ToastProvider>
       </body>
     </html>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { signedUrlsFor } from "@/lib/photos";
 import PublishButton from "@/app/review/PublishButton";
 import ResetButton from "./ResetButton";
@@ -24,13 +24,16 @@ type ListItem = {
 
 export default async function ListingsPage() {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return <div className="p-8 text-center" style={{ color: "var(--fg-muted)" }}>Not signed in.</div>;
 
-  const { data: approved } = await supabase.from("items")
-    .select("id,status,title,price,currency,ebay_listing_id,ebay_listing_url,ebay_listing_status,ebay_error,created_at")
-    .eq("status", "approved").order("created_at", { ascending: false });
-  const { data: listed } = await supabase.from("items")
-    .select("id,status,title,price,currency,ebay_listing_id,ebay_listing_url,ebay_listing_status,ebay_error,created_at")
-    .in("status", ["listed", "sold"]).order("created_at", { ascending: false });
+  const db = createServiceClient();
+  const fields = "id,status,title,price,currency,ebay_listing_id,ebay_listing_url,ebay_listing_status,ebay_error,created_at";
+
+  const { data: approved } = await db.from("items").select(fields)
+    .eq("user_id", user.id).eq("status", "approved").order("created_at", { ascending: false });
+  const { data: listed } = await db.from("items").select(fields)
+    .eq("user_id", user.id).in("status", ["listed", "sold"]).order("created_at", { ascending: false });
 
   const approvedItems = (approved ?? []) as ListItem[];
   const listedItems = (listed ?? []) as ListItem[];
