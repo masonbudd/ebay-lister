@@ -36,12 +36,14 @@ export default async function ReviewPage() {
     ai_error: "Processing timed out after 5 minutes — please edit manually.",
   }).eq("user_id", user.id).eq("status", "processing").lt("updated_at", cutoff);
 
-  const { data: items } = await db
+  const { data: items, error: qErr } = await db
     .from("items")
     .select("id,status,title,description,condition,category_name,price,price_is_estimate,price_reasoning,currency,item_specifics,ai_confidence,ai_error,created_at")
     .eq("user_id", user.id)
     .in("status", REVIEW_STATUSES)
     .order("created_at", { ascending: false });
+
+  console.log(`[review] server render at ${new Date().toISOString()}: user=${user.id.slice(0,8)}, items=${items?.length ?? 0}, error=${qErr?.message ?? "none"}`);
 
   const ids = (items ?? []).map((i) => i.id);
   const { data: photos } = ids.length
@@ -58,13 +60,16 @@ export default async function ReviewPage() {
     photosByItem.set(p.item_id, arr);
   }
 
+  const itemCount = (items ?? []).length;
+  const now = new Date().toISOString();
+
   return (
     <div className="max-w-lg mx-auto px-4 pt-4 pb-8 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
           <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-            {(items ?? []).length} item{(items ?? []).length === 1 ? "" : "s"} awaiting review.
+            {itemCount} item{itemCount === 1 ? "" : "s"} awaiting review.
           </p>
         </div>
         <Link href="/upload" className="btn" style={{ minHeight: 40, padding: "0 12px" }}>
@@ -72,16 +77,23 @@ export default async function ReviewPage() {
         </Link>
       </div>
 
-      {(items ?? []).length === 0 && (
+      {/* Debug line — remove once the issue is resolved. */}
+      <p className="text-[10px] font-mono" style={{ color: "var(--fg-dim)" }}>
+        server: {itemCount} items, user: {user.id.slice(0, 8)}, rendered: {now}
+      </p>
+
+      {itemCount === 0 && (
         <div className="card p-8 text-center" style={{ color: "var(--fg-muted)" }}>
           Nothing to review yet. Upload some items to get started.
         </div>
       )}
 
-      <ReviewList
-        items={items ?? []}
-        photosByItem={Object.fromEntries(photosByItem)}
-      />
+      {itemCount > 0 && (
+        <ReviewList
+          items={items!}
+          photosByItem={Object.fromEntries(photosByItem)}
+        />
+      )}
     </div>
   );
 }
